@@ -1,0 +1,98 @@
+---
+# Alert checking and notification tasks
+
+- name: Analyze alert data
+  set_fact:
+    critical_alerts: "{{ alert_data | selectattr('alerts', 'defined') | selectattr('alerts', 'intersect', ['ON_BATTERY', 'HIGH_TEMP', 'CRITICAL_LOAD']) | list }}"
+    compensation_alerts: "{{ alert_data | selectattr('alerts', 'defined') | selectattr('alerts', 'intersect', ['COMPENSATION_ACTIVE']) | list }}"
+    unreachable_devices: "{{ alert_data | selectattr('status', 'equalto', 'unreachable') | list }}"
+    all_alerts: "{{ alert_data | selectattr('alerts', 'defined') | selectattr('alerts', '!=', []) | list }}"
+
+- name: Generate alert summary
+  set_fact:
+    alert_summary:
+      timestamp: "{{ ansible_date_time.iso8601 }}"
+      total_devices: "{{ alert_data | length }}"
+      devices_with_alerts: "{{ all_alerts | length }}"
+      critical_count: "{{ critical_alerts | length }}"
+      compensation_count: "{{ compensation_alerts | length }}"
+      unreachable_count: "{{ unreachable_devices | length }}"
+      alert_details: "{{ all_alerts }}"
+
+- name: Create alert report file
+  template:
+    src: alert_report.j2
+    dest: "{{ playbook_dir }}/../reports/alert_report_{{ ansible_date_time.date }}_{{ ansible_date_time.hour }}{{ ansible_date_time.minute }}.json"
+    mode: '0644'
+  vars:
+    alerts: "{{ alert_summary }}"
+
+- name: Display critical alerts
+  debug:
+    msg: |
+      🚨 CRITICAL ALERT: {{ item.ups_host }} ({{ item.ip_address }})
+      Location: {{ item.location }}
+      Issues: {{ item.power_quality_issues | join(', ') }}
+      Alerts: {{ item.alerts | join(', ') }}
+  loop: "{{ critical_alerts }}"
+  when: critical_alerts | length > 0
+
+- name: Display voltage compensation alerts
+  debug:
+    msg: |
+      ⚠️  COMPENSATION EVENT: {{ item.ups_host }} ({{ item.ip_address }})
+      Location: {{ item.location }}
+      Issues: {{ item.power_quality_issues | join(', ') }}
+      Recommendation: Investigate utility power quality
+  loop: "{{ compensation_alerts }}"
+  when: compensation_alerts | length > 0
+
+- name: Display unreachable devices
+  debug:
+    msg: |
+      ❌ UNREACHABLE: {{ item.ups_host }} ({{ item.ip_address }})
+      Location: {{ item.location }}
+      Status: {{ item.status }}
+  loop: "{{ unreachable_devices }}"
+  when: unreachable_devices | length > 0
+
+- name: Send email alerts for critical issues
+  mail:
+    to: "{{ alert_email }}"
+    subject: "UPS Critical Alert - {{ critical_alerts | length }} devices affected"
+    body: |
+      UPS Power Quality Alert Report
+      Generated: {{ ansible_date_time.iso8601 }}
+      
+      Critical Issues Detected:
+      {% for alert in critical_alerts %}
+      - {{ alert.ups_host }} ({{ alert.ip_address }}) at {{ alert.location }}
+        Issues: {{ alert.power_quality_issues | join(', ') }}
+        Alerts: {{ alert.alerts | join(', ') }}
+      {% endfor %}
+      
+      Voltage Compensation Events:
+      {% for alert in compensation_alerts %}
+      - {{ alert.ups_host }} ({{ alert.ip_address }}) at {{ alert.location }}
+        Issues: {{ alert.power_quality_issues | join(', ') }}
+      {% endfor %}
+      
+      Please investigate power quality issues immediately.
+      
+      Full report available in monitoring system.
+    charset: utf8
+  when: 
+    - critical_alerts | length > 0 or compensation_alerts | length > 0
+    - alert_email is defined
+    - alert_email != ""
+  ignore_errors: yes
+
+- name: Log alert summary
+  debug:
+    msg: |
+      Alert Summary for {{ ansible_date_time.iso8601 }}:
+      - Total devices monitored: {{ alert_summary.total_devices }}
+      - Devices with alerts: {{ alert_summary.devices_with_alerts }}
+      - Critical alerts: {{ alert_summary.critical_count }}
+      - Compensation events: {{ alert_summary.compensation_count }}
+      - Unreachable devices: {{ alert_summary.unreachable_count }}
