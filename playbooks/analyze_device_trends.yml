@@ -1,0 +1,81 @@
+---
+# Analyze trends for individual UPS device
+
+- name: "Extract device information for {{ analyzed_device }}"
+  set_fact:
+    device_ip: "{{ hostvars[analyzed_device]['ansible_host'] }}"
+    device_model: "{{ hostvars[analyzed_device]['ups_model'] }}"
+    device_location: "{{ hostvars[analyzed_device]['ups_location'] }}"
+
+- name: "Count compensation events for {{ analyzed_device }}"
+  set_fact:
+    device_compensation_count: "{{ device_data | selectattr('alerts', 'defined') | selectattr('alerts', 'intersect', ['COMPENSATION_ACTIVE']) | list | length }}"
+    device_voltage_issues: "{{ device_data | selectattr('power_quality_issues', 'defined') | map(attribute='power_quality_issues') | select('match', '.*VOLTAGE.*') | list | length }}"
+    device_load_issues: "{{ device_data | selectattr('power_quality_issues', 'defined') | map(attribute='power_quality_issues') | select('match', '.*LOAD.*') | list | length }}"
+
+- name: "Analyze voltage stability for {{ analyzed_device }}"
+  block:
+    - name: Extract voltage readings
+      set_fact:
+        voltage_readings: "{{ device_data | selectattr('parsed_snmp_data', 'defined') | map(attribute='parsed_snmp_data.input_voltage') | select('number') | list }}"
+    
+    - name: Calculate voltage statistics
+      set_fact:
+        voltage_stats:
+          count: "{{ voltage_readings | length }}"
+          min: "{{ voltage_readings | min if voltage_readings | length > 0 else 0 }}"
+          max: "{{ voltage_readings | max if voltage_readings | length > 0 else 0 }}"
+          avg: "{{ (voltage_readings | sum / voltage_readings | length) | round(2) if voltage_readings | length > 0 else 0 }}"
+          stability_score: "{{ 100 - ((voltage_readings | max - voltage_readings | min) * 2) if voltage_readings | length > 0 else 0 }}"
+  when: device_data | length > 0
+
+- name: "Analyze load trends for {{ analyzed_device }}"
+  block:
+    - name: Extract load readings
+      set_fact:
+        load_readings: "{{ device_data | selectattr('parsed_snmp_data', 'defined') | map(attribute='parsed_snmp_data.output_load') | select('number') | list }}"
+    
+    - name: Calculate load statistics
+      set_fact:
+        load_stats:
+          count: "{{ load_readings | length }}"
+          min: "{{ load_readings | min if load_readings | length > 0 else 0 }}"
+          max: "{{ load_readings | max if load_readings | length > 0 else 0 }}"
+          avg: "{{ (load_readings | sum / load_readings | length) | round(2) if load_readings | length > 0 else 0 }}"
+          trend: "{{ 'increasing' if load_readings | length > 1 and load_readings[-1] > load_readings[0] else 'stable' }}"
+  when: device_data | length > 0
+
+- name: "Update global analysis variables"
+  set_fact:
+    compensation_frequency: "{{ compensation_frequency | combine({analyzed_device: device_compensation_count}) }}"
+    voltage_stability_analysis: "{{ voltage_stability_analysis | combine({analyzed_device: voltage_stats | default({})}) }}"
+    load_trend_analysis: "{{ load_trend_analysis | combine({analyzed_device: load_stats | default({})}) }}"
+    total_compensation_events: "{{ total_compensation_events + (device_compensation_count | int) }}"
+
+- name: "Check if device is high-risk"
+  set_fact:
+    devices_with_frequent_compensation: "{{ devices_with_frequent_compensation + [{'name': analyzed_device, 'ip': device_ip, 'location': device_location, 'compensation_count': device_compensation_count}] }}"
+  when: (device_compensation_count | int) > 5
+
+- name: "Analyze failure correlation patterns for {{ analyzed_device }}"
+  set_fact:
+    device_failure_indicators:
+      compensation_frequency: "{{ device_compensation_count | int }}"
+      voltage_instability: "{{ (voltage_stats.stability_score | default(100) | int) < 80 }}"
+      high_load_events: "{{ device_load_issues | int }}"
+      temperature_issues: "{{ device_data | selectattr('power_quality_issues', 'defined') | map(attribute='power_quality_issues') | select('match', '.*TEMPERATURE.*') | list | length }}"
+      failure_risk_score: "{{ ((device_compensation_count | int) * 20 + (device_voltage_issues | int) * 15 + (device_load_issues | int) * 10) | int }}"
+  
+- name: "Update failure correlation data"
+  set_fact:
+    failure_correlation_data: "{{ failure_correlation_data | combine({analyzed_device: device_failure_indicators}) }}"
+
+- name: "Log device analysis for {{ analyzed_device }}"
+  debug:
+    msg: |
+      Device: {{ analyzed_device }} ({{ device_ip }})
+      Compensation Events: {{ device_compensation_count }}
+      Voltage Issues: {{ device_voltage_issues }}
+      Load Issues: {{ device_load_issues }}
+      Failure Risk Score: {{ device_failure_indicators.failure_risk_score }}
+    verbosity: 1
