@@ -1,0 +1,81 @@
+{
+  "report_metadata": {
+    "report_type": "UPS_POWER_QUALITY_MONITORING",
+    "generated_at": "{{ ansible_date_time.iso8601 }}",
+    "generated_by": "Ansible UPS Monitoring System",
+    "hostname": "{{ ansible_hostname }}",
+    "report_id": "{{ ansible_date_time.epoch }}",
+    "ansible_version": "{{ ansible_version.full }}"
+  },
+  "monitoring_summary": {
+    "total_devices": {{ groups['ups_devices'] | length }},
+    "online_devices": {{ report_data | selectattr('status', 'equalto', 'online') | list | length }},
+    "unreachable_devices": {{ report_data | selectattr('status', 'equalto', 'unreachable') | list | length }},
+    "devices_with_issues": {{ report_data | selectattr('power_quality_issues', 'defined') | selectattr('power_quality_issues', '!=', []) | list | length }},
+    "devices_with_alerts": {{ report_data | selectattr('alerts', 'defined') | selectattr('alerts', '!=', []) | list | length }}
+  },
+  "power_quality_analysis": {
+    "compensation_events": {{ report_data | selectattr('alerts', 'defined') | selectattr('alerts', 'intersect', ['COMPENSATION_ACTIVE']) | list | length }},
+    "voltage_issues": {{ report_data | selectattr('power_quality_issues', 'defined') | map(attribute='power_quality_issues') | select('match', '.*VOLTAGE.*') | list | length }},
+    "load_issues": {{ report_data | selectattr('power_quality_issues', 'defined') | map(attribute='power_quality_issues') | select('match', '.*LOAD.*') | list | length }},
+    "temperature_issues": {{ report_data | selectattr('power_quality_issues', 'defined') | map(attribute='power_quality_issues') | select('match', '.*TEMPERATURE.*') | list | length }},
+    "frequency_issues": {{ report_data | selectattr('power_quality_issues', 'defined') | map(attribute='power_quality_issues') | select('match', '.*FREQUENCY.*') | list | length }}
+  },
+  "device_details": [
+{% for device in report_data %}
+    {
+      "ups_host": "{{ device.ups_host }}",
+      "ip_address": "{{ device.ip_address }}",
+      "status": "{{ device.status }}",
+      "model": "{{ device.model }}",
+      "location": "{{ device.location }}",
+      "capacity_watts": {{ device.capacity_watts }},
+      "timestamp": "{{ device.timestamp }}",
+{% if device.parsed_snmp_data is defined %}
+      "monitoring_data": {
+        "input_voltage": {{ device.parsed_snmp_data.input_voltage | default('null') }},
+        "output_voltage": {{ device.parsed_snmp_data.output_voltage | default('null') }},
+        "input_frequency": {{ device.parsed_snmp_data.input_frequency | default('null') }},
+        "output_load": {{ device.parsed_snmp_data.output_load | default('null') }},
+        "battery_capacity": {{ device.parsed_snmp_data.battery_capacity | default('null') }},
+        "battery_temperature": {{ device.parsed_snmp_data.battery_temperature | default('null') }},
+        "ups_state": {{ device.parsed_snmp_data.ups_basic_state | default('null') }},
+        "ups_state_description": "{{ device.ups_state_description | default('Unknown') }}"
+      },
+{% endif %}
+      "power_quality_issues": {{ device.power_quality_issues | default([]) | to_json }},
+      "alerts": {{ device.alerts | default([]) | to_json }},
+      "quality_score": {{ device.quality_score | default(0) }},
+      "recommendations": {{ device.recommendations | default([]) | to_json }}
+    }{% if not loop.last %},{% endif %}
+{% endfor %}
+  ],
+  "system_recommendations": [
+{% set all_issues = report_data | selectattr('power_quality_issues', 'defined') | map(attribute='power_quality_issues') | list | flatten %}
+{% if 'VOLTAGE_COMPENSATION' in (all_issues | join(' ')) %}
+    "Investigate utility power quality - multiple UPS devices showing voltage compensation",
+    "Consider installing power conditioning equipment for the facility",
+{% endif %}
+{% if 'HIGH_LOAD' in (all_issues | join(' ')) %}
+    "Review load distribution across UPS devices",
+    "Plan for additional UPS capacity if multiple devices show high load",
+{% endif %}
+{% if 'HIGH_TEMPERATURE' in (all_issues | join(' ')) %}
+    "Check facility HVAC and UPS ventilation systems",
+{% endif %}
+{% if report_data | selectattr('status', 'equalto', 'unreachable') | list | length > 0 %}
+    "Investigate network connectivity to unreachable UPS devices",
+    "Verify SNMP configuration on offline devices",
+{% endif %}
+    "Continue regular power quality monitoring for trend analysis",
+    "Schedule maintenance for any UPS showing recurring issues"
+  ],
+  "jfrog_integration": {
+    "enabled": {{ jfrog_enabled | default(false) }},
+{% if jfrog_enabled | default(false) %}
+    "repository_url": "{{ jfrog_url }}/{{ jfrog_repository }}",
+    "data_uploaded": true,
+{% endif %}
+    "local_data_retention_days": {{ data_retention_days }}
+  }
+}
