@@ -1,0 +1,32 @@
+---
+# CSV logging tasks for UPS monitoring data
+
+- name: Check if CSV file exists
+  stat:
+    path: "{{ csv_file }}"
+  register: csv_file_stat
+
+- name: Create CSV header if file doesn't exist
+  lineinfile:
+    path: "{{ csv_file }}"
+    line: "timestamp,ups_host,ip_address,model,location,status,input_voltage,output_voltage,input_frequency,output_load,battery_capacity,battery_temperature,ups_state,ups_state_description,power_quality_issues,alerts,quality_score"
+    create: yes
+    mode: '0644'
+  when: not csv_file_stat.stat.exists
+
+- name: Format monitoring data for CSV
+  set_fact:
+    formatted_csv_data: "{{ monitoring_data | map('format_ups_data') | list }}"
+
+- name: Append monitoring data to CSV
+  lineinfile:
+    path: "{{ csv_file }}"
+    line: "{{ item.timestamp }},{{ item.ups_host }},{{ item.ip_address }},{{ item.model }},{{ item.location }},{{ item.status }},{{ item.input_voltage | default('N/A') }},{{ item.output_voltage | default('N/A') }},{{ item.input_frequency | default('N/A') }},{{ item.output_load | default('N/A') }},{{ item.battery_capacity | default('N/A') }},{{ item.battery_temperature | default('N/A') }},{{ item.ups_state | default('N/A') }},{{ item.ups_state_description | default('Unknown') }},\"{{ item.power_quality_issues }}\",\"{{ item.alerts }}\",{{ item.quality_score | default(0) }}"
+    create: no
+  loop: "{{ formatted_csv_data }}"
+  loop_control:
+    label: "{{ item.ups_host }}"
+
+- name: Display CSV file location
+  debug:
+    msg: "Monitoring data logged to: {{ csv_file }}"
