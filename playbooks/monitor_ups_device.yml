@@ -1,0 +1,94 @@
+---
+# Monitor individual UPS device via SNMP
+# This task is included for each UPS in the inventory
+
+- name: "Test connectivity to {{ ups_host }}"
+  wait_for:
+    host: "{{ hostvars[ups_host]['ansible_host'] }}"
+    port: "{{ snmp_port }}"
+    timeout: 5
+    state: started
+  register: connectivity_test
+  ignore_errors: yes
+
+- name: "Gather UPS data from {{ ups_host }}"
+  block:
+    - name: "Get UPS model information"
+      snmp_facts:
+        host: "{{ hostvars[ups_host]['ansible_host'] }}"
+        version: "{{ snmp_version }}"
+        community: "{{ hostvars[ups_host]['snmp_community'] }}"
+        timeout: "{{ snmp_timeout }}"
+        retries: 2
+      register: ups_snmp_data
+      ignore_errors: yes
+
+    - name: "Query APC-specific OIDs"
+      shell: |
+        snmpget -v{{ snmp_version }} -c{{ hostvars[ups_host]['snmp_community'] }} {{ hostvars[ups_host]['ansible_host'] }} {{ item.oid }}
+      loop:
+        - { name: "ups_model", oid: "1.3.6.1.4.1.318.1.1.1.1.1.1.0" }
+        - { name: "ups_name", oid: "1.3.6.1.4.1.318.1.1.1.1.1.2.0" }
+        - { name: "serial_number", oid: "1.3.6.1.4.1.318.1.1.1.1.2.3.0" }
+        - { name: "firmware_version", oid: "1.3.6.1.4.1.318.1.1.1.1.2.1.0" }
+        - { name: "input_voltage", oid: "1.3.6.1.4.1.318.1.1.1.3.2.1.0" }
+        - { name: "input_frequency", oid: "1.3.6.1.4.1.318.1.1.1.3.2.4.0" }
+        - { name: "input_fail_cause", oid: "1.3.6.1.4.1.318.1.1.1.3.2.5.0" }
+        - { name: "output_voltage", oid: "1.3.6.1.4.1.318.1.1.1.4.2.1.0" }
+        - { name: "output_frequency", oid: "1.3.6.1.4.1.318.1.1.1.4.2.2.0" }
+        - { name: "output_load", oid: "1.3.6.1.4.1.318.1.1.1.4.2.3.0" }
+        - { name: "output_current", oid: "1.3.6.1.4.1.318.1.1.1.4.2.4.0" }
+        - { name: "battery_status", oid: "1.3.6.1.4.1.318.1.1.1.2.1.1.0" }
+        - { name: "battery_capacity", oid: "1.3.6.1.4.1.318.1.1.1.2.2.1.0" }
+        - { name: "battery_voltage", oid: "1.3.6.1.4.1.318.1.1.1.2.2.2.0" }
+        - { name: "battery_temperature", oid: "1.3.6.1.4.1.318.1.1.1.2.2.4.0" }
+        - { name: "ups_basic_state", oid: "1.3.6.1.4.1.318.1.1.1.11.1.1.0" }
+        - { name: "last_self_test_result", oid: "1.3.6.1.4.1.318.1.1.1.7.2.3.0" }
+        - { name: "num_transfers_to_battery", oid: "1.3.6.1.4.1.318.1.1.1.11.2.1.0" }
+      register: ups_oid_data
+      ignore_errors: yes
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: "Parse UPS monitoring data"
+      set_fact:
+        ups_monitoring_result:
+          ups_host: "{{ ups_host }}"
+          ip_address: "{{ hostvars[ups_host]['ansible_host'] }}"
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+          status: "online"
+          connectivity: "{{ 'ok' if connectivity_test.state is defined else 'failed' }}"
+          model: "{{ hostvars[ups_host]['ups_model'] }}"
+          location: "{{ hostvars[ups_host]['ups_location'] }}"
+          capacity_watts: "{{ hostvars[ups_host]['ups_capacity_watts'] }}"
+          snmp_data: "{{ ups_oid_data.results | items2dict(key_name='item', value_name='stdout') }}"
+          power_quality_issues: []
+          alerts: []
+
+    - name: "Analyze power quality for {{ ups_host }}"
+      set_fact:
+        power_quality_analysis: "{{ ups_monitoring_result | power_quality_filter }}"
+      vars:
+        ansible_python_interpreter: "{{ ansible_playbook_python }}"
+
+    - name: "Update monitoring result with analysis"
+      set_fact:
+        ups_monitoring_result: "{{ ups_monitoring_result | combine(power_quality_analysis) }}"
+
+  rescue:
+    - name: "Handle UPS monitoring failure"
+      set_fact:
+        ups_monitoring_result:
+          ups_host: "{{ ups_host }}"
+          ip_address: "{{ hostvars[ups_host]['ansible_host'] }}"
+          timestamp: "{{ ansible_date_time.iso8601 }}"
+          status: "unreachable"
+          connectivity: "failed"
+          error: "{{ ansible_failed_result.msg | default('Unknown error') }}"
+          power_quality_issues: ["CONNECTION_FAILED"]
+          alerts: ["UNREACHABLE"]
+
+- name: "Log monitoring result for {{ ups_host }}"
+  debug:
+    var: ups_monitoring_result
+    verbosity: 1
