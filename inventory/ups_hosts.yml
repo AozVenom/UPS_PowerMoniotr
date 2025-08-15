@@ -1,0 +1,78 @@
+---
+# Ansible Inventory for UPS Monitoring
+# Define your UPS devices and monitoring hosts
+
+all:
+  children:
+    monitoring_hosts:
+      hosts:
+        localhost:
+          ansible_connection: local
+          ansible_python_interpreter: "{{ ansible_playbook_python }}"
+          monitoring_role: primary
+          jfrog_enabled: true
+    
+    ups_devices:
+      hosts:
+        ups-01:
+          ansible_host: 192.168.1.10
+          ups_model: SMT2200RMCU
+          ups_location: "Server Room Rack 1"
+          ups_capacity_watts: 1980
+          snmp_community: "{{ vault_snmp_community }}"
+          critical_load_threshold: 75
+          warning_load_threshold: 60
+        
+        ups-02:
+          ansible_host: 192.168.1.15
+          ups_model: SMT3000RMCU
+          ups_location: "Server Room Rack 2"
+          ups_capacity_watts: 2700
+          snmp_community: "{{ vault_snmp_community }}"
+          critical_load_threshold: 75
+          warning_load_threshold: 60
+        
+        ups-03:
+          ansible_host: 192.168.1.20
+          ups_model: SMT1500RMCU
+          ups_location: "Network Closet"
+          ups_capacity_watts: 1000
+          snmp_community: "{{ vault_snmp_community }}"
+          critical_load_threshold: 70
+          warning_load_threshold: 55
+        
+        ups-04:
+          ansible_host: 10.0.0.5
+          ups_model: SMT2200RMCU
+          ups_location: "Backup Power Room"
+          ups_capacity_watts: 1980
+          snmp_community: "{{ vault_snmp_community }}"
+          critical_load_threshold: 75
+          warning_load_threshold: 60
+
+  vars:
+    # Global UPS monitoring settings
+    snmp_port: 161
+    snmp_version: "2c"
+    snmp_timeout: 5
+    monitoring_interval: 30  # seconds
+    data_retention_days: 90
+    
+    # JFrog Artifactory settings
+    jfrog_url: "https://your-company.jfrog.io/artifactory"
+    jfrog_repository: "ups-monitoring"
+    jfrog_username: "{{ vault_jfrog_username }}"
+    jfrog_token: "{{ vault_jfrog_token }}"
+    
+    # Power quality thresholds
+    voltage_low_threshold: 200
+    voltage_high_threshold: 250
+    frequency_low_threshold: 49
+    frequency_high_threshold: 51
+    temperature_high_threshold: 35
+    
+    # Alerting settings
+    alert_on_compensation: true
+    alert_on_battery: true
+    alert_on_high_load: true
+    alert_email: "ops-team@company.com"
