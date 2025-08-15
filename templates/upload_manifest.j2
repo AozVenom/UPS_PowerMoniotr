@@ -1,0 +1,75 @@
+---
+# Single iteration of continuous monitoring
+
+- name: "Display monitoring progress"
+  debug:
+    msg: |
+      🔄 Monitoring Iteration {{ iteration_number + 1 }}/{{ total_iterations }}
+      Time: {{ ansible_date_time.time }}
+      Progress: {{ ((iteration_number + 1) / total_iterations * 100) | round(1) }}%
+  when: (iteration_number % 10) == 0  # Display every 10th iteration
+
+- name: "Monitor all UPS devices - Iteration {{ iteration_number + 1 }}"
+  include_tasks: monitor_ups_device.yml
+  loop: "{{ groups['ups_devices'] }}"
+  loop_control:
+    loop_var: ups_host
+  register: iteration_monitoring_results
+
+- name: "Log iteration data to CSV"
+  include_tasks: log_to_csv.yml
+  vars:
+    csv_file: "{{ session_path }}/ups_monitoring_{{ ansible_date_time.date }}.csv"
+    monitoring_data: "{{ iteration_monitoring_results.results }}"
+
+- name: "Check for immediate alerts"
+  set_fact:
+    iteration_alerts: "{{ iteration_monitoring_results.results | selectattr('alerts', 'defined') | selectattr('alerts', '!=', []) | list }}"
+
+- name: "Handle critical alerts during monitoring"
+  block:
+    - name: "Log critical alert"
+      lineinfile:
+        path: "{{ session_path }}/critical_alerts.log"
+        line: "{{ ansible_date_time.iso8601 }} - CRITICAL: {{ item.ups_host }} ({{ item.ip_address }}) - {{ item.alerts | join(', ') }}"
+        create: yes
+        mode: '0644'
+      loop: "{{ iteration_alerts | selectattr('alerts', 'intersect', ['ON_BATTERY', 'CRITICAL_LOAD', 'HIGH_TEMP']) | list }}"
+      loop_control:
+        label: "{{ item.ups_host }}"
+
+    - name: "Display critical alert"
+      debug:
+        msg: |
+          🚨 CRITICAL ALERT - Iteration {{ iteration_number + 1 }}
+          Device: {{ item.ups_host }} ({{ item.ip_address }})
+          Location: {{ item.location }}
+          Alerts: {{ item.alerts | join(', ') }}
+          Issues: {{ item.power_quality_issues | join(', ') }}
+      loop: "{{ iteration_alerts | selectattr('alerts', 'intersect', ['ON_BATTERY', 'CRITICAL_LOAD', 'HIGH_TEMP']) | list }}"
+      loop_control:
+        label: "{{ item.ups_host }}"
+  when: iteration_alerts | length > 0
+
+- name: "Log compensation events"
+  lineinfile:
+    path: "{{ session_path }}/compensation_events.log"
+    line: "{{ ansible_date_time.iso8601 }} - COMPENSATION: {{ item.ups_host }} ({{ item.ip_address }}) - {{ item.power_quality_issues | select('match', '.*COMPENSATION.*') | join(', ') }}"
+    create: yes
+    mode: '0644'
+  loop: "{{ iteration_alerts | selectattr('alerts', 'intersect', ['COMPENSATION_ACTIVE']) | list }}"
+  loop_control:
+    label: "{{ item.ups_host }}"
+  when: iteration_alerts | selectattr('alerts', 'intersect', ['COMPENSATION_ACTIVE']) | list | length > 0
+
+- name: "Update iteration metadata"
+  lineinfile:
+    path: "{{ session_path }}/iteration_log.txt"
+    line: "{{ ansible_date_time.iso8601 }},{{ iteration_number + 1 }},{{ iteration_monitoring_results.results | selectattr('status', 'equalto', 'online') | list | length }},{{ iteration_alerts | length }}"
+    create: yes
+    mode: '0644'
+
+- name: "Pause between iterations"
+  pause:
+    seconds: "{{ monitoring_interval_seconds }}"
+  when: iteration_number < (total_iterations - 1)  # Don't pause after last iteration
