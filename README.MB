@@ -1,0 +1,395 @@
+# Ansible UPS Power Quality Monitoring System
+
+Enterprise-grade UPS monitoring solution using Ansible for APC Smart-UPS devices with focus on power quality investigation and failure correlation analysis.
+
+## 🚀 Quick Start
+
+```bash
+# 1. Clone/create project structure
+mkdir ups-monitor-ansible && cd ups-monitor-ansible
+
+# 2. Configure your UPS devices
+cp inventory/ups_hosts.yml.example inventory/ups_hosts.yml
+# Edit with your actual UPS IP addresses
+
+# 3. Set up secure credentials
+ansible-vault create group_vars/all/vault.yml
+# Add your SNMP community strings and JFrog credentials
+
+# 4. Run monitoring
+./start_monitoring.sh
+```
+
+## 📁 Project Structure
+
+```
+ups-monitor-ansible/
+├── playbooks/                     # Ansible playbooks
+│   ├── ups_monitoring.yml         # Main monitoring playbook
+│   ├── continuous_monitoring.yml  # Long-term monitoring
+│   ├── analyze_power_quality.yml  # Power quality analysis
+│   ├── monitor_ups_device.yml     # Individual device monitoring
+│   ├── log_to_csv.yml            # CSV data logging
+│   ├── upload_to_jfrog.yml       # JFrog Artifactory integration
+│   ├── check_alerts.yml          # Alert processing
+│   ├── analyze_device_trends.yml  # Trend analysis
+│   └── monitoring_iteration.yml   # Continuous monitoring loop
+├── inventory/
+│   └── ups_hosts.yml             # UPS device inventory
+├── group_vars/
+│   └── all/
+│       └── vault.yml             # Encrypted credentials
+├── filter_plugins/
+│   └── ups_filters.py            # Custom analysis filters
+├── templates/                    # Jinja2 templates
+│   ├── ups_monitoring_config.j2  # Configuration template
+│   ├── monitoring_report.j2      # Report templates
+│   ├── upload_manifest.j2        # Upload tracking
+│   └── alert_report.j2           # Alert reporting
+├── data/                         # Monitoring data (auto-created)
+├── logs/                         # System logs (auto-created)
+├── reports/                      # Generated reports (auto-created)
+├── config/                       # Generated configurations
+├── start_monitoring.sh           # Quick start script
+└── README.md                     # This file
+```
+
+## ⚙️ Configuration
+
+### 1. UPS Device Inventory
+
+Edit `inventory/ups_hosts.yml`:
+
+```yaml
+ups_devices:
+  hosts:
+    ups-01:
+      ansible_host: 192.168.1.10
+      ups_model: SMT2200RMCU
+      ups_location: "Server Room Rack 1"
+      ups_capacity_watts: 1980
+      snmp_community: "{{ vault_snmp_community }}"
+```
+
+### 2. Secure Credentials
+
+Create encrypted vault:
+
+```bash
+ansible-vault create group_vars/all/vault.yml
+```
+
+Content:
+```yaml
+vault_snmp_community: "your_snmp_community_string"
+vault_jfrog_username: "your_jfrog_username"
+vault_jfrog_token: "your_jfrog_access_token"
+```
+
+### 3. Global Settings
+
+Modify variables in `inventory/ups_hosts.yml`:
+
+```yaml
+all:
+  vars:
+    monitoring_interval: 30        # seconds
+    voltage_low_threshold: 200     # volts
+    voltage_high_threshold: 250    # volts
+    jfrog_enabled: true           # Enable JFrog integration
+```
+
+## 🔧 Usage
+
+### Single Monitoring Snapshot
+
+```bash
+ansible-playbook -i inventory/ups_hosts.yml playbooks/ups_monitoring.yml --ask-vault-pass
+```
+
+### Continuous Monitoring (24 hours)
+
+```bash
+ansible-playbook -i inventory/ups_hosts.yml playbooks/continuous_monitoring.yml --ask-vault-pass
+```
+
+### Custom Duration Monitoring
+
+```bash
+ansible-playbook -i inventory/ups_hosts.yml playbooks/continuous_monitoring.yml \
+  --ask-vault-pass \
+  --extra-vars "monitoring_duration_hours=48"
+```
+
+### Power Quality Analysis Only
+
+```bash
+ansible-playbook -i inventory/ups_hosts.yml playbooks/analyze_power_quality.yml --ask-vault-pass
+```
+
+### Test UPS Connectivity
+
+```bash
+ansible -i inventory/ups_hosts.yml ups_devices -m wait_for \
+  -a "host={{ ansible_host }} port=161 timeout=5" \
+  --ask-vault-pass
+```
+
+## 📊 Monitoring Features
+
+### Power Quality Detection
+- **Voltage Compensation Events** - Smart Boost/Smart Trim detection
+- **Frequency Deviations** - Power quality issues
+- **Load Analysis** - Capacity utilization and trends
+- **Temperature Monitoring** - Thermal stress detection
+- **Transfer Event Logging** - Battery operation tracking
+
+### Failure Correlation Analysis
+- **Compensation Frequency Tracking** - Patterns before failures
+- **Voltage Stability Analysis** - Power quality trends
+- **Load Stress Indicators** - Overload conditions
+- **Environmental Monitoring** - Temperature and conditions
+- **Predictive Risk Scoring** - Failure probability assessment
+
+### Model-Specific Monitoring
+| Model | Capacity | Load Thresholds | Special Features |
+|-------|----------|-----------------|------------------|
+| SMT1500RMCU | 1000W | Warning: 70%, Critical: 85% | Basic monitoring |
+| SMT2200RMCU | 1980W | Warning: 75%, Critical: 90% | Enhanced metrics |
+| SMT3000RMCU | 2700W | Warning: 75%, Critical: 90% | Full feature set |
+
+## 📈 Data Output
+
+### CSV Data Files
+- **Location**: `data/ups_monitoring_YYYY-MM-DD.csv`
+- **Contents**: Timestamped power quality metrics
+- **Format**: Compatible with Excel and analysis tools
+
+### JSON Reports
+- **Power Quality Reports**: `reports/power_quality_report_YYYY-MM-DD.json`
+- **Alert Reports**: `reports/alert_report_YYYY-MM-DD_HHMM.json`
+- **Trend Analysis**: `reports/power_quality_trends_YYYY-MM-DD.json`
+- **Failure Predictions**: `reports/failure_prediction_YYYY-MM-DD.json`
+
+### JFrog Artifactory Storage
+```
+ups-monitoring/
+├── monitoring-data/{hostname}/{date}/     # Compressed monitoring data
+├── configurations/{hostname}/             # System configurations
+├── manifests/{hostname}/                  # Upload tracking
+└── sessions/{session_id}/                 # Continuous monitoring sessions
+```
+
+## 🔍 Power Quality Investigation
+
+### Voltage Compensation Analysis
+The system specifically monitors for:
+- **Smart Boost Events** - Low voltage compensation (< 200V input)
+- **Smart Trim Events** - High voltage compensation (> 250V input)
+- **Frequency Correlation** - Compensation events vs. frequency variations
+- **Load Impact** - How compensation affects system load
+
+### Failure Prediction
+Risk factors analyzed:
+1. **Compensation Frequency** - High frequency indicates power quality issues
+2. **Voltage Instability** - Large voltage swings stress UPS components
+3. **Load Stress** - High load combined with compensation increases failure risk
+4. **Temperature Trends** - Heat buildup from frequent switching
+5. **Transfer Patterns** - Frequent battery transfers indicate problems
+
+### Investigation Workflow
+1. **Baseline Monitoring** - 24-48 hours of normal operation data
+2. **Event Correlation** - Identify patterns before known failures
+3. **Trend Analysis** - Long-term power quality degradation
+4. **Predictive Alerts** - Early warning of potential failures
+
+## 🚨 Alerting System
+
+### Alert Types
+- **🔴 CRITICAL**: Power failures, critical load, high temperature
+- **🟡 WARNING**: Voltage compensation, high load, communication issues
+- **🔵 INFO**: State changes, successful tests, routine events
+
+### Alert Destinations
+- **Console Output** - Real-time monitoring display
+- **Log Files** - Structured logging for analysis
+- **Email Notifications** - Critical and warning alerts
+- **JFrog Artifacts** - Centralized alert reporting
+
+## 🔧 Troubleshooting
+
+### Common Issues
+
+#### SNMP Connection Failures
+```bash
+# Test SNMP connectivity
+snmpget -v2c -c public 192.168.1.10 1.3.6.1.4.1.318.1.1.1.1.1.1.0
+
+# Check network connectivity
+ansible -i inventory/ups_hosts.yml ups_devices -m ping --ask-vault-pass
+```
+
+#### Ansible Vault Issues
+```bash
+# Edit vault file
+ansible-vault edit group_vars/all/vault.yml
+
+# Change vault password
+ansible-vault rekey group_vars/all/vault.yml
+```
+
+#### Permission Errors
+```bash
+# Fix file permissions
+chmod +x start_monitoring.sh
+chmod 644 inventory/ups_hosts.yml
+```
+
+### Debug Mode
+```bash
+# Run with verbose output
+ansible-playbook -i inventory/ups_hosts.yml playbooks/ups_monitoring.yml \
+  --ask-vault-pass -vvv
+```
+
+## 📋 Requirements
+
+### System Requirements
+- **Ansible 2.9+**
+- **Python 3.6+**
+- **WSL, Ubuntu, or RHEL/CentOS**
+- **Network access** to UPS devices on port 161 (SNMP)
+
+### Python Dependencies
+```bash
+pip3 install pysnmp requests pyyaml
+```
+
+### Optional: JFrog Integration
+- **JFrog Artifactory instance**
+- **Access token** with repository read/write permissions
+- **Network access** to JFrog instance
+
+## 🔐 Security Features
+
+### Encrypted Credentials
+- **Ansible Vault** - All sensitive data encrypted at rest
+- **SNMP Community Strings** - Secure storage and rotation
+- **JFrog Tokens** - Scoped access tokens for API access
+
+### Access Control
+- **Vault Password Protection** - Required for all operations
+- **Scoped Permissions** - Limited JFrog repository access
+- **Audit Logging** - All operations logged with timestamps
+
+### Network Security
+- **SNMP v2c/v3** - Secure SNMP communication where supported
+- **HTTPS** - All JFrog communication encrypted
+- **Firewall Friendly** - Only uses standard SNMP port 161
+
+## 🚀 Advanced Features
+
+### Custom Analysis Filters
+The system includes custom Ansible filters for advanced analysis:
+- **power_quality_filter** - Comprehensive power quality analysis
+- **voltage_analysis** - Voltage stability assessment
+- **load_analysis** - Load pattern analysis
+- **ups_state_decode** - UPS state interpretation
+
+### Extensibility
+- **Modular Design** - Easy to add new UPS models
+- **Custom Templates** - Flexible reporting formats
+- **Plugin Architecture** - Custom analysis filters
+- **API Integration** - JFrog and email notification support
+
+## 📚 Additional Resources
+
+- **APC PowerNet MIB** - SNMP object definitions
+- **Ansible Documentation** - [docs.ansible.com](https://docs.ansible.com)
+- **JFrog REST API** - Artifactory integration guide
+- **SNMP Tools** - Command-line utilities for testing
+
+## 🤝 Contributing
+
+To extend the monitoring system:
+
+1. **Add new UPS models** - Update inventory and filter plugins
+2. **Custom analysis** - Modify filter_plugins/ups_filters.py
+3. **New alert types** - Extend check_alerts.yml playbook
+4. **Additional integrations** - Create new upload/notification tasks
+5. **Enhanced reporting** - Add templates in templates/ directory
+
+### Development Guidelines
+- **Test changes** with single device first
+- **Use verbose mode** (-vvv) for debugging
+- **Validate YAML** syntax before running
+- **Document new features** in playbook comments
+
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🆘 Support
+
+### Getting Help
+1. **Check logs** - Review files in logs/ directory
+2. **Test connectivity** - Use ansible ping module
+3. **Validate config** - Run ansible-playbook --check
+4. **Enable debug** - Use -vvv flag for verbose output
+
+### Reporting Issues
+When reporting issues, include:
+- **Ansible version** - `ansible --version`
+- **Error messages** - Complete output with -vvv
+- **Configuration** - Sanitized inventory and vault files
+- **UPS models** - Device types being monitored
+
+---
+
+## 🎯 Power Quality Investigation Guide
+
+### For Your Specific Use Case
+
+Since you're investigating power issues where UPS devices show compensation events followed by failures:
+
+#### 1. **Baseline Data Collection**
+```bash
+# Run 48-hour continuous monitoring
+ansible-playbook -i inventory/ups_hosts.yml playbooks/continuous_monitoring.yml \
+  --ask-vault-pass \
+  --extra-vars "monitoring_duration_hours=48 monitoring_interval_seconds=10"
+```
+
+#### 2. **Focus on Compensation Events**
+The system will automatically:
+- ✅ **Log Smart Boost/Trim events** in `compensation_events.log`
+- ✅ **Track frequency** of compensation per device
+- ✅ **Correlate** with voltage readings and load
+- ✅ **Generate risk scores** for failure prediction
+
+#### 3. **Analysis Reports**
+After monitoring, check these files:
+- `reports/power_quality_trends_*.json` - Compensation frequency analysis
+- `reports/failure_prediction_*.json` - Risk assessment per device
+- `data/ups_monitoring_*.csv` - Raw data for Excel analysis
+
+#### 4. **Key Metrics to Watch**
+- **Compensation Events per Hour** - Normal < 2, Concerning > 5, Critical > 10
+- **Voltage Stability Score** - Good > 90, Poor < 80, Critical < 70
+- **Load vs Compensation Correlation** - High load + compensation = high risk
+- **Temperature Trends** - Increases during compensation indicate stress
+
+#### 5. **Failure Prediction Indicators**
+The system flags devices as high-risk when:
+- More than 5 compensation events in monitoring period
+- Voltage stability score below 80
+- Temperature increases during compensation
+- Load consistently above 60% during compensation
+
+This Ansible-based solution gives you enterprise-grade power quality monitoring without requiring Python virtual environments, while providing the same deep analysis capabilities for your failure investigation.
+
+---
+
+**Version:** 2.0.0  
+**Compatibility:** Ansible 2.9+, Python 3.6+  
+**Last Updated:** January 15, 2025
