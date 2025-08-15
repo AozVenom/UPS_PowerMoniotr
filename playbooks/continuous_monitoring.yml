@@ -1,0 +1,100 @@
+---
+# Continuous UPS Power Quality Monitoring
+# For long-term power quality investigation
+
+- name: Continuous UPS Power Quality Monitoring
+  hosts: monitoring_hosts
+  gather_facts: yes
+  vars:
+    monitoring_duration_hours: 24
+    monitoring_interval_seconds: 30
+    max_iterations: "{{ (monitoring_duration_hours * 3600 / monitoring_interval_seconds) | int }}"
+    
+  tasks:
+    - name: Display monitoring configuration
+      debug:
+        msg: |
+          🔍 Starting Continuous UPS Power Quality Monitoring
+          =================================================
+          Duration: {{ monitoring_duration_hours }} hours
+          Polling Interval: {{ monitoring_interval_seconds }} seconds
+          Total Iterations: {{ max_iterations }}
+          UPS Devices: {{ groups['ups_devices'] | length }}
+          Start Time: {{ ansible_date_time.iso8601 }}
+          
+          Press Ctrl+C to stop monitoring early
+
+    - name: Create monitoring session directory
+      file:
+        path: "{{ playbook_dir }}/../data/session_{{ ansible_date_time.epoch }}"
+        state: directory
+        mode: '0755'
+      register: session_dir
+
+    - name: Initialize monitoring session metadata
+      copy:
+        content: |
+          session_id: {{ ansible_date_time.epoch }}
+          start_time: {{ ansible_date_time.iso8601 }}
+          duration_hours: {{ monitoring_duration_hours }}
+          interval_seconds: {{ monitoring_interval_seconds }}
+          devices: {{ groups['ups_devices'] }}
+          status: running
+        dest: "{{ session_dir.path }}/session_metadata.yml"
+        mode: '0644'
+
+    - name: Continuous monitoring loop
+      include_tasks: monitoring_iteration.yml
+      loop: "{{ range(0, max_iterations) | list }}"
+      loop_control:
+        loop_var: iteration_number
+        pause: "{{ monitoring_interval_seconds }}"
+      vars:
+        session_path: "{{ session_dir.path }}"
+        total_iterations: "{{ max_iterations }}"
+
+    - name: Finalize monitoring session
+      copy:
+        content: |
+          session_id: {{ ansible_date_time.epoch }}
+          start_time: {{ ansible_date_time.iso8601 }}
+          end_time: {{ ansible_date_time.iso8601 }}
+          duration_hours: {{ monitoring_duration_hours }}
+          interval_seconds: {{ monitoring_interval_seconds }}
+          devices: {{ groups['ups_devices'] }}
+          status: completed
+          total_iterations: {{ max_iterations }}
+        dest: "{{ session_dir.path }}/session_metadata.yml"
+        mode: '0644'
+
+    - name: Generate session summary report
+      template:
+        src: session_summary.j2
+        dest: "{{ session_dir.path }}/session_summary.json"
+        mode: '0644'
+      vars:
+        session_data: "{{ session_dir.path }}"
+
+    - name: Upload session data to JFrog
+      include_tasks: upload_session_to_jfrog.yml
+      when: jfrog_enabled | default(false)
+      vars:
+        session_directory: "{{ session_dir.path }}"
+
+    - name: Display monitoring completion
+      debug:
+        msg: |
+          ✅ Continuous Monitoring Session Complete
+          ========================================
+          Session ID: {{ ansible_date_time.epoch }}
+          Duration: {{ monitoring_duration_hours }} hours
+          Data Location: {{ session_dir.path }}
+          
+          Files generated:
+          - Session metadata: session_metadata.yml
+          - Monitoring data: ups_monitoring_*.csv
+          - Summary report: session_summary.json
+          
+          {% if jfrog_enabled | default(false) %}
+          Data uploaded to: {{ jfrog_url }}/{{ jfrog_repository }}/sessions/
+          {% endif %}
