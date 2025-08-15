@@ -1,0 +1,57 @@
+{
+  "alert_report": {
+    "generated_at": "{{ alerts.timestamp }}",
+    "report_type": "UPS_POWER_QUALITY_ALERTS",
+    "monitoring_system": "Ansible UPS Monitor",
+    "hostname": "{{ ansible_hostname }}"
+  },
+  "alert_summary": {
+    "total_devices_monitored": {{ alerts.total_devices }},
+    "devices_with_alerts": {{ alerts.devices_with_alerts }},
+    "critical_alerts": {{ alerts.critical_count }},
+    "compensation_events": {{ alerts.compensation_count }},
+    "unreachable_devices": {{ alerts.unreachable_count }},
+    "alert_severity_distribution": {
+      "critical": {{ alerts.critical_count }},
+      "warning": {{ alerts.compensation_count }},
+      "info": {{ alerts.devices_with_alerts - alerts.critical_count - alerts.compensation_count }}
+    }
+  },
+  "detailed_alerts": [
+{% for alert in alerts.alert_details %}
+    {
+      "ups_host": "{{ alert.ups_host }}",
+      "ip_address": "{{ alert.ip_address }}",
+      "location": "{{ alert.location }}",
+      "model": "{{ alert.model }}",
+      "timestamp": "{{ alert.timestamp }}",
+      "status": "{{ alert.status }}",
+      "alerts": {{ alert.alerts | to_json }},
+      "power_quality_issues": {{ alert.power_quality_issues | to_json }},
+      "quality_score": {{ alert.quality_score | default(0) }},
+      "recommendations": {{ alert.recommendations | default([]) | to_json }}
+    }{% if not loop.last %},{% endif %}
+{% endfor %}
+  ],
+  "system_health_assessment": {
+    "overall_status": "{% if alerts.critical_count > 0 %}CRITICAL{% elif alerts.compensation_count > 0 %}WARNING{% else %}NORMAL{% endif %}",
+    "power_quality_score": {{ 100 - (alerts.critical_count * 30) - (alerts.compensation_count * 15) }},
+    "infrastructure_stability": "{% if alerts.unreachable_count == 0 %}STABLE{% else %}DEGRADED{% endif %}"
+  },
+  "recommended_actions": [
+{% if alerts.critical_count > 0 %}
+    "Immediate investigation required for {{ alerts.critical_count }} critical alerts",
+    "Check UPS devices reporting power failures or high load conditions",
+{% endif %}
+{% if alerts.compensation_count > 0 %}
+    "Investigate utility power quality - {{ alerts.compensation_count }} devices showing voltage compensation",
+    "Consider power conditioning equipment for facility",
+{% endif %}
+{% if alerts.unreachable_count > 0 %}
+    "Restore communication to {{ alerts.unreachable_count }} unreachable UPS devices",
+    "Verify network connectivity and SNMP configuration",
+{% endif %}
+    "Continue regular monitoring for trend analysis",
+    "Schedule maintenance for devices with recurring issues"
+  ]
+}
