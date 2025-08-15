@@ -1,0 +1,22 @@
+{
+    "ansible.python.interpreterPath": "/usr/bin/python3",
+    "ansible.validation.enabled": true,
+    "ansible.validation.lint.enabled": true,
+    "files.associations": {
+        "*.yml": "ansible",
+        "*.yaml": "ansible"
+    },
+    "yaml.schemas": {
+        "https://raw.githubusercontent.com/ansible/ansible-lint/main/src/ansiblelint/schemas/ansible.json": [
+            "playbooks/*.yml",
+            "playbooks/*.yaml"
+        ]
+    },
+    "yaml.customTags": [
+        "!vault scalar"
+    ],
+    "files.exclude": {
+        "**/.ansible": true,
+        "**/logs/**": true
+    }
+}
