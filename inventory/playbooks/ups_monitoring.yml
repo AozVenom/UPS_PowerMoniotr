@@ -1,0 +1,106 @@
+---
+# Main UPS Power Quality Monitoring Playbook
+# Monitors APC Smart-UPS devices and analyzes power quality
+
+- name: UPS Power Quality Monitoring and Analysis
+  hosts: monitoring_hosts
+  gather_facts: yes
+  vars:
+    monitoring_timestamp: "{{ ansible_date_time.iso8601 }}"
+    data_file: "data/ups_monitoring_{{ ansible_date_time.date }}.csv"
+    report_file: "reports/power_quality_report_{{ ansible_date_time.date }}.json"
+    
+  tasks:
+    - name: Ensure monitoring directories exist
+      file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ playbook_dir }}/../data"
+        - "{{ playbook_dir }}/../logs" 
+        - "{{ playbook_dir }}/../reports"
+        - "{{ playbook_dir }}/../config"
+
+    - name: Install required system packages
+      package:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - python3-pip
+        - snmp
+        - snmp-mibs-downloader
+      become: yes
+      when: ansible_os_family == "Debian"
+
+    - name: Install Python SNMP modules
+      pip:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - pysnmp
+        - requests
+        - pyyaml
+      become: yes
+
+    - name: Create UPS monitoring configuration
+      template:
+        src: ups_monitoring_config.j2
+        dest: "{{ playbook_dir }}/../config/ups_monitoring.yml"
+        mode: '0644'
+      notify: restart monitoring
+
+    - name: Monitor all UPS devices
+      include_tasks: monitor_ups_device.yml
+      loop: "{{ groups['ups_devices'] }}"
+      loop_control:
+        loop_var: ups_host
+      register: ups_monitoring_results
+
+    - name: Analyze power quality data
+      include_tasks: analyze_power_quality.yml
+      vars:
+        monitoring_results: "{{ ups_monitoring_results.results }}"
+
+    - name: Generate monitoring report
+      template:
+        src: monitoring_report.j2
+        dest: "{{ report_file }}"
+        mode: '0644'
+      vars:
+        report_data: "{{ ups_monitoring_results.results }}"
+
+    - name: Log monitoring results to CSV
+      include_tasks: log_to_csv.yml
+      vars:
+        csv_file: "{{ data_file }}"
+        monitoring_data: "{{ ups_monitoring_results.results }}"
+
+    - name: Upload data to JFrog Artifactory
+      include_tasks: upload_to_jfrog.yml
+      when: jfrog_enabled | default(false)
+      vars:
+        upload_files:
+          - "{{ data_file }}"
+          - "{{ report_file }}"
+
+    - name: Check for power quality alerts
+      include_tasks: check_alerts.yml
+      vars:
+        alert_data: "{{ ups_monitoring_results.results }}"
+
+    - name: Display monitoring summary
+      debug:
+        msg: |
+          UPS Monitoring Summary - {{ monitoring_timestamp }}
+          ================================================
+          Total UPS Devices: {{ groups['ups_devices'] | length }}
+          Online Devices: {{ ups_monitoring_results.results | selectattr('status', 'equalto', 'online') | list | length }}
+          Devices with Issues: {{ ups_monitoring_results.results | selectattr('power_quality_issues', 'defined') | selectattr('power_quality_issues', '!=', []) | list | length }}
+          Data saved to: {{ data_file }}
+          Report saved to: {{ report_file }}
+
+  handlers:
+    - name: restart monitoring
+      debug:
+        msg: "Monitoring configuration updated"
