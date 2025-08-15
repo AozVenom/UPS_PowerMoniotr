@@ -1,0 +1,79 @@
+---
+# Upload monitoring data and reports to JFrog Artifactory
+
+- name: Compress data files for upload
+  archive:
+    path: "{{ item }}"
+    dest: "{{ item }}.gz"
+    format: gz
+  loop: "{{ upload_files }}"
+  when: item is file
+
+- name: Generate upload timestamp
+  set_fact:
+    upload_timestamp: "{{ ansible_date_time.epoch }}"
+    hostname: "{{ ansible_hostname }}"
+
+- name: Upload files to JFrog Artifactory
+  uri:
+    url: "{{ jfrog_url }}/{{ jfrog_repository }}/monitoring-data/{{ hostname }}/{{ ansible_date_time.date }}/{{ upload_timestamp }}/{{ item | basename }}.gz"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ jfrog_token }}"
+      Content-Type: "application/gzip"
+    src: "{{ item }}.gz"
+    status_code: [200, 201]
+    timeout: 60
+  loop: "{{ upload_files }}"
+  register: jfrog_upload_results
+  ignore_errors: yes
+  when: item is file
+
+- name: Upload monitoring configuration
+  uri:
+    url: "{{ jfrog_url }}/{{ jfrog_repository }}/configurations/{{ hostname }}/ups_monitoring_{{ ansible_date_time.date }}.yml"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ jfrog_token }}"
+      Content-Type: "application/yaml"
+    src: "{{ playbook_dir }}/../config/ups_monitoring.yml"
+    status_code: [200, 201]
+    timeout: 30
+  register: config_upload_result
+  ignore_errors: yes
+
+- name: Create upload manifest
+  template:
+    src: upload_manifest.j2
+    dest: "{{ playbook_dir }}/../data/upload_manifest_{{ ansible_date_time.date }}.json"
+    mode: '0644'
+  vars:
+    upload_results: "{{ jfrog_upload_results.results }}"
+    config_upload: "{{ config_upload_result }}"
+
+- name: Upload manifest to JFrog
+  uri:
+    url: "{{ jfrog_url }}/{{ jfrog_repository }}/manifests/{{ hostname }}/upload_manifest_{{ ansible_date_time.date }}.json"
+    method: PUT
+    headers:
+      Authorization: "Bearer {{ jfrog_token }}"
+      Content-Type: "application/json"
+    src: "{{ playbook_dir }}/../data/upload_manifest_{{ ansible_date_time.date }}.json"
+    status_code: [200, 201]
+    timeout: 30
+  ignore_errors: yes
+
+- name: Clean up compressed files
+  file:
+    path: "{{ item }}.gz"
+    state: absent
+  loop: "{{ upload_files }}"
+  when: item is file
+
+- name: Display upload summary
+  debug:
+    msg: |
+      JFrog Upload Summary:
+      Successful uploads: {{ jfrog_upload_results.results | selectattr('status', 'equalto', 200) | list | length + jfrog_upload_results.results | selectattr('status', 'equalto', 201) | list | length }}
+      Failed uploads: {{ jfrog_upload_results.results | rejectattr('status', 'in', [200, 201]) | list | length }}
+      Repository: {{ jfrog_url }}/{{ jfrog_repository }}/monitoring-data/{{ hostname }}/
