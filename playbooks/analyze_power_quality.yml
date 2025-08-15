@@ -1,0 +1,80 @@
+---
+# Advanced Power Quality Analysis Tasks
+# Analyzes trends and correlates failure patterns
+
+- name: Load historical monitoring data
+  find:
+    paths: "{{ playbook_dir }}/../data"
+    patterns: "ups_monitoring_*.csv"
+    age: "-{{ data_retention_days }}d"
+  register: historical_data_files
+
+- name: Calculate power quality metrics
+  block:
+    - name: Initialize analysis variables
+      set_fact:
+        compensation_frequency: {}
+        voltage_stability_analysis: {}
+        load_trend_analysis: {}
+        failure_correlation_data: {}
+        total_compensation_events: 0
+        devices_with_frequent_compensation: []
+
+    - name: Analyze each UPS device
+      include_tasks: analyze_device_trends.yml
+      loop: "{{ groups['ups_devices'] }}"
+      loop_control:
+        loop_var: analyzed_device
+      vars:
+        device_data: "{{ monitoring_results | selectattr('ups_host', 'equalto', analyzed_device) | list }}"
+
+    - name: Generate power quality trend report
+      template:
+        src: power_quality_trends.j2
+        dest: "{{ playbook_dir }}/../reports/power_quality_trends_{{ ansible_date_time.date }}.json"
+        mode: '0644'
+      vars:
+        trend_analysis:
+          compensation_frequency: "{{ compensation_frequency }}"
+          voltage_analysis: "{{ voltage_stability_analysis }}"
+          load_trends: "{{ load_trend_analysis }}"
+          failure_correlations: "{{ failure_correlation_data }}"
+          analysis_timestamp: "{{ ansible_date_time.iso8601 }}"
+
+    - name: Identify high-risk devices
+      set_fact:
+        high_risk_devices: "{{ devices_with_frequent_compensation }}"
+      vars:
+        risk_threshold: 5  # More than 5 compensation events indicates risk
+
+    - name: Generate failure prediction report
+      template:
+        src: failure_prediction.j2
+        dest: "{{ playbook_dir }}/../reports/failure_prediction_{{ ansible_date_time.date }}.json"
+        mode: '0644'
+      vars:
+        prediction_data:
+          high_risk_devices: "{{ high_risk_devices }}"
+          analysis_date: "{{ ansible_date_time.iso8601 }}"
+          prediction_accuracy: "experimental"
+          recommendations: "{{ failure_prediction_recommendations }}"
+
+- name: Display power quality analysis summary
+  debug:
+    msg: |
+      🔍 Power Quality Analysis Summary
+      ===============================
+      Total Compensation Events: {{ total_compensation_events }}
+      Devices with Frequent Compensation: {{ devices_with_frequent_compensation | length }}
+      High-Risk Devices: {{ high_risk_devices | length }}
+      
+      {% if high_risk_devices | length > 0 %}
+      ⚠️  HIGH RISK DEVICES REQUIRING ATTENTION:
+      {% for device in high_risk_devices %}
+      - {{ device.name }} ({{ device.ip }}) - {{ device.compensation_count }} events
+      {% endfor %}
+      {% endif %}
+      
+      Reports Generated:
+      - Power Quality Trends: reports/power_quality_trends_{{ ansible_date_time.date }}.json
+      - Failure Prediction: reports/failure_prediction_{{ ansible_date_time.date }}.json
